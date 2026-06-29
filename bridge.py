@@ -343,6 +343,13 @@ class H(BaseHTTPRequestHandler):
                 self._send({"label": labels[choice], "index": choice})
             else:
                 self._send({"label": None})
+        elif path == "/show_question":
+            # Observation-only: display the question on the buddy and return at
+            # once. We never block — the terminal owns the actual answer.
+            qtext, labels = _question_of(ev.get("tool_input", {}))
+            note_activity(sid, "asking...")
+            send({"question": {"id": "info", "q": qtext[:150], "opts": labels, "info": 1}})
+            self._send({"ok": True})
         elif path == "/activity":
             if ev.get("transcript_path"):
                 _transcript[0] = ev["transcript_path"]

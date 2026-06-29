@@ -61,6 +61,8 @@ struct Buddy {
   char questionId[40] = "", questionText[160] = "";
   char qOpts[4][48];
   uint8_t qOptCount = 0;
+  bool questionInfo = false;        // observation-only (answer on the computer)
+  uint32_t questionShownMs = 0;
   uint32_t lastLiveMs = 0;
   uint32_t promptShownMs = 0;
 } B;
@@ -111,7 +113,7 @@ static lv_obj_t *listBox, *lblTokens, *lblCost;
 static lv_obj_t *arc[4], *arcPct[4];   // Claude 5h, Claude 7d, Codex 5h, Codex 7d
 static lv_obj_t *promptCard, *lblPromptTool, *lblPromptHint;
 static lv_obj_t *passkeyCard, *lblPasskey;
-static lv_obj_t *questionCard, *lblQuestion, *optBtn[4], *optLbl[4];
+static lv_obj_t *questionCard, *lblQuestion, *lblQTitle, *optBtn[4], *optLbl[4];
 
 static bool dataConnected() { return B.lastLiveMs && (millis() - B.lastLiveMs) <= 30000; }
 
@@ -207,6 +209,8 @@ static void applyLine(const char *line) {
       strncpy(B.qOpts[n], s ? s : "", 47); B.qOpts[n][47] = 0; n++;
     }
     B.qOptCount = n;
+    B.questionInfo = q["info"] | false;   // observation-only (answer on computer)
+    B.questionShownMs = millis();
   }
   if (doc["qclear"] | false) { B.questionId[0] = 0; B.qOptCount = 0; }
 
@@ -274,6 +278,7 @@ static void onDeny(lv_event_t *) {
 
 static void onOption(lv_event_t *e) {
   if (!B.questionId[0]) return;
+  if (B.questionInfo) { B.questionId[0] = 0; B.qOptCount = 0; return; }  // observation-only: tap dismisses
   int i = (int)(intptr_t)lv_event_get_user_data(e);
   if (i < 0 || i >= B.qOptCount) return;
   char buf[64];
@@ -431,9 +436,9 @@ static void buildUI() {
   lv_obj_set_style_border_color(questionCard, lv_color_hex(COL_GOOD), 0);
   lv_obj_set_size(questionCard, 464, 452);
   lv_obj_center(questionCard);
-  lv_obj_t *qTitle = mkLabel(questionCard, &mono_20, COL_GOOD);
-  lv_label_set_text(qTitle, "Claude asks");
-  lv_obj_align(qTitle, LV_ALIGN_TOP_MID, 0, 0);
+  lblQTitle = mkLabel(questionCard, &mono_20, COL_GOOD);
+  lv_label_set_text(lblQTitle, "Claude asks");
+  lv_obj_align(lblQTitle, LV_ALIGN_TOP_MID, 0, 0);
   lblQuestion = mkLabel(questionCard, &mono_20, COL_TEXT);
   lv_obj_set_width(lblQuestion, 430);
   lv_label_set_long_mode(lblQuestion, LV_LABEL_LONG_WRAP);
@@ -541,8 +546,12 @@ static void render() {
     lv_obj_add_flag(promptCard, LV_OBJ_FLAG_HIDDEN);
   }
 
-  // AskUserQuestion overlay
+  // AskUserQuestion overlay — observation-only: shows what Claude is asking,
+  // you answer in the terminal. Auto-dismisses after 45s (or tap to dismiss).
+  if (B.questionId[0] && B.questionInfo && millis() - B.questionShownMs > 45000)
+    B.questionId[0] = 0;
   if (B.questionId[0]) {
+    lv_label_set_text(lblQTitle, B.questionInfo ? "Claude asks  -  answer on your computer" : "Claude asks");
     lv_label_set_text(lblQuestion, B.questionText);
     for (int i = 0; i < 4; i++) {
       if (i < B.qOptCount) {
