@@ -1,0 +1,14 @@
+# PlatformIO build output
+firmware/.pio/
+# Python venv + caches
+.venv/
+__pycache__/
+*.pyc
+# Cloned reference repos (not part of this project)
+reference/
+# Backups / binaries
+*.bin
+backups/
+# Editor / OS cruft
+.DS_Store
+*.bak-buddy
