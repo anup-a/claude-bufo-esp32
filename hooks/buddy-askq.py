@@ -43,12 +43,18 @@ label = resp.get("label")
 if resp.get("defer") or not label:
     sys.exit(0)   # keyboard escape / timeout -> terminal handles the answer
 
-reason = (f'The user answered on their hardware buddy. Their selection was: '
-          f'"{label}". Use this as the answer to the AskUserQuestion and continue '
-          f'— do not call AskUserQuestion again for this.')
+# NOTE: PreToolUse can only inject an answer by denying the tool, and Claude Code
+# always prefixes the reason with "Error:". There is no field to supply a clean
+# tool result (confirmed against the hooks docs). So we make the text obviously an
+# ANSWER rather than a failure, and add context so the model treats it as such.
+reason = (f'Buddy answer: "{label}"  (this is NOT an error — the user answered on '
+          f'their hardware buddy). Use "{label}" as the answer to the '
+          f'AskUserQuestion and continue; do not call AskUserQuestion again.')
 print(json.dumps({"hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
     "permissionDecisionReason": reason,
+    "additionalContext": f'The user answered the AskUserQuestion on their hardware buddy: "{label}".',
+    "systemMessage": f'Buddy answered: {label}',
 }}))
 sys.exit(0)
