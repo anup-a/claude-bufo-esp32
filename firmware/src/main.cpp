@@ -113,7 +113,7 @@ static lv_obj_t *listBox, *lblTokens, *lblCost;
 static lv_obj_t *arc[4], *arcPct[4];   // Claude 5h, Claude 7d, Codex 5h, Codex 7d
 static lv_obj_t *promptCard, *lblPromptTool, *lblPromptHint;
 static lv_obj_t *passkeyCard, *lblPasskey;
-static lv_obj_t *questionCard, *lblQuestion, *lblQTitle, *optBtn[4], *optLbl[4];
+static lv_obj_t *questionCard, *lblQuestion, *lblQTitle, *optBtn[4], *optLbl[4], *kbdBtn;
 
 static bool dataConnected() { return B.lastLiveMs && (millis() - B.lastLiveMs) <= 30000; }
 
@@ -278,11 +278,19 @@ static void onDeny(lv_event_t *) {
 
 static void onOption(lv_event_t *e) {
   if (!B.questionId[0]) return;
-  if (B.questionInfo) { B.questionId[0] = 0; B.qOptCount = 0; return; }  // observation-only: tap dismisses
   int i = (int)(intptr_t)lv_event_get_user_data(e);
   if (i < 0 || i >= B.qOptCount) return;
   char buf[64];
   snprintf(buf, sizeof(buf), "{\"id\":\"%s\",\"qchoice\":%d}", B.questionId, i);
+  sendJson(buf);
+  B.questionId[0] = 0; B.qOptCount = 0;
+}
+
+// "Answer on keyboard instead" -> tell the collector to defer to the terminal.
+static void onKbd(lv_event_t *) {
+  if (!B.questionId[0]) return;
+  char buf[64];
+  snprintf(buf, sizeof(buf), "{\"id\":\"%s\",\"qchoice\":-1}", B.questionId);
   sendJson(buf);
   B.questionId[0] = 0; B.qOptCount = 0;
 }
@@ -455,6 +463,17 @@ static void buildUI() {
     lv_label_set_long_mode(optLbl[i], LV_LABEL_LONG_DOT);
     lv_obj_center(optLbl[i]);
   }
+  // Keyboard escape — defer the answer to the terminal (full typing / multi-select).
+  kbdBtn = lv_button_create(questionCard);
+  lv_obj_set_size(kbdBtn, 430, 40);
+  lv_obj_align(kbdBtn, LV_ALIGN_BOTTOM_MID, 0, -4);
+  lv_obj_set_style_bg_color(kbdBtn, lv_color_hex(0x10202C), 0);
+  lv_obj_set_style_border_width(kbdBtn, 1, 0);
+  lv_obj_set_style_border_color(kbdBtn, lv_color_hex(COL_MUTED), 0);
+  lv_obj_add_event_cb(kbdBtn, onKbd, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *kl = mkLabel(kbdBtn, &mono_14, COL_MUTED);
+  lv_label_set_text(kl, "Answer on keyboard instead");
+  lv_obj_center(kl);
   lv_obj_add_flag(questionCard, LV_OBJ_FLAG_HIDDEN);
 }
 

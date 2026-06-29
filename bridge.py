@@ -328,22 +328,27 @@ class H(BaseHTTPRequestHandler):
         elif path == "/question":
             qtext, labels = _question_of(ev.get("tool_input", {}))
             note_activity(sid, "question")
-            timeout = float(ev.get("_timeout", 580))
-            with _prompt_gate:
-                qid = uuid.uuid4().hex[:8]
-                with _slock:
-                    _pending[qid] = True
-                print(f"[buddy] -> question id={qid} {qtext[:40]!r} opts={labels}")
-                send({"question": {"id": qid, "q": qtext[:150], "opts": labels}})
-                choice = wait_decision(qid, timeout)
-                with _slock:
-                    _pending.pop(qid, None)
-                send({"qclear": True})
-            print(f"[buddy] <- choice id={qid}: {choice}")
-            if isinstance(choice, int) and 0 <= choice < len(labels):
-                self._send({"label": labels[choice], "index": choice})
+            if not _ser:
+                # Buddy not connected -> don't block; let the terminal handle it.
+                self._send({"label": None, "defer": True})
             else:
-                self._send({"label": None})
+                timeout = float(ev.get("_timeout", 85))
+                with _prompt_gate:
+                    qid = uuid.uuid4().hex[:8]
+                    with _slock:
+                        _pending[qid] = True
+                    print(f"[buddy] -> question id={qid} {qtext[:40]!r} opts={labels}")
+                    send({"question": {"id": qid, "q": qtext[:150], "opts": labels, "kbd": 1}})
+                    choice = wait_decision(qid, timeout)
+                    with _slock:
+                        _pending.pop(qid, None)
+                    send({"qclear": True})
+                print(f"[buddy] <- choice id={qid}: {choice}")
+                if isinstance(choice, int) and 0 <= choice < len(labels):
+                    self._send({"label": labels[choice], "index": choice})
+                else:
+                    # -1 (tapped "keyboard") or None (timeout) -> defer to the terminal
+                    self._send({"label": None, "defer": True})
         elif path == "/show_question":
             # Observation-only: display the question on the buddy and return at
             # once. We never block — the terminal owns the actual answer.
