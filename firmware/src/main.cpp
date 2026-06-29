@@ -276,22 +276,12 @@ static void onDeny(lv_event_t *) {
   B.promptId[0] = 0;
 }
 
-static void onOption(lv_event_t *e) {
-  if (!B.questionId[0]) return;
-  int i = (int)(intptr_t)lv_event_get_user_data(e);
-  if (i < 0 || i >= B.qOptCount) return;
-  char buf[64];
-  snprintf(buf, sizeof(buf), "{\"id\":\"%s\",\"qchoice\":%d}", B.questionId, i);
-  sendJson(buf);
+// Observation-only (Flux model): the buddy displays the question, you answer in
+// the terminal. A tap just dismisses the card.
+static void onOption(lv_event_t *) {
   B.questionId[0] = 0; B.qOptCount = 0;
 }
-
-// "Answer on keyboard instead" -> tell the collector to defer to the terminal.
 static void onKbd(lv_event_t *) {
-  if (!B.questionId[0]) return;
-  char buf[64];
-  snprintf(buf, sizeof(buf), "{\"id\":\"%s\",\"qchoice\":-1}", B.questionId);
-  sendJson(buf);
   B.questionId[0] = 0; B.qOptCount = 0;
 }
 
@@ -586,6 +576,7 @@ static void render() {
         lv_obj_add_flag(optBtn[i], LV_OBJ_FLAG_HIDDEN);
       }
     }
+    lv_obj_add_flag(kbdBtn, LV_OBJ_FLAG_HIDDEN);   // Flux model: no buddy answering
     lv_obj_clear_flag(questionCard, LV_OBJ_FLAG_HIDDEN);
   } else {
     lv_obj_add_flag(questionCard, LV_OBJ_FLAG_HIDDEN);
