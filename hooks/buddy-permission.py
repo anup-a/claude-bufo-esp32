@@ -17,6 +17,11 @@ try:
 except Exception:
     sys.exit(0)
 
+# AskUserQuestion isn't an approve/deny decision — it's handled observation-only
+# by buddy-askq.py. Don't show a permission card for it.
+if ev.get("tool_name") == "AskUserQuestion":
+    sys.exit(0)
+
 ev["_timeout"] = 580
 try:
     req = urllib.request.Request(
