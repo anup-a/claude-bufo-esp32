@@ -551,11 +551,17 @@ static void render() {
   if (B.questionId[0] && B.questionInfo && millis() - B.questionShownMs > 45000)
     B.questionId[0] = 0;
   if (B.questionId[0]) {
-    lv_label_set_text(lblQTitle, B.questionInfo ? "Claude asks  -  answer on your computer" : "Claude asks");
+    lv_label_set_text(lblQTitle, B.questionInfo ? "ANSWER IN YOUR TERMINAL" : "Claude asks");
+    lv_obj_set_style_text_color(lblQTitle, lv_color_hex(B.questionInfo ? COL_AMBER : COL_GOOD), 0);
     lv_label_set_text(lblQuestion, B.questionText);
     for (int i = 0; i < 4; i++) {
       if (i < B.qOptCount) {
-        lv_label_set_text(optLbl[i], B.qOpts[i]);
+        // In observation mode the options are a read-only list, not buttons,
+        // so it's clear you answer on the computer (the buddy can't submit).
+        lv_label_set_text_fmt(optLbl[i], B.questionInfo ? "  -  %s" : "%s", B.qOpts[i]);
+        lv_obj_set_style_bg_opa(optBtn[i], B.questionInfo ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(optLbl[i], lv_color_hex(B.questionInfo ? COL_MUTED : COL_TEXT), 0);
+        if (B.questionInfo) lv_obj_set_style_text_align(optLbl[i], LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_clear_flag(optBtn[i], LV_OBJ_FLAG_HIDDEN);
       } else {
         lv_obj_add_flag(optBtn[i], LV_OBJ_FLAG_HIDDEN);
