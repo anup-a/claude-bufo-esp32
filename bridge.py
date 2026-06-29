@@ -16,6 +16,7 @@ lines are prefixed with \\x02BUDDY so they can be picked out of boot/log noise.
 """
 import json
 import os
+import subprocess
 import sys
 import time
 import threading
@@ -111,9 +112,13 @@ def reader():
                 d = json.loads(ln[i + len(PROMPT_PREFIX):].decode("utf-8", "replace"))
             except Exception:
                 continue
-            if "id" in d and ("decision" in d or "qchoice" in d):
+            if "id" in d and "qchoice" in d:
+                # Buddy answered a (non-blocking) question -> type it into the
+                # live terminal picker. Does not unblock any waiter.
+                handle_qchoice(d["id"], d["qchoice"])
+            elif "id" in d and "decision" in d:
                 with _dcv:
-                    _decisions[d["id"]] = d.get("decision", d.get("qchoice"))
+                    _decisions[d["id"]] = d["decision"]
                     _dcv.notify_all()
 
 
@@ -126,6 +131,51 @@ def wait_decision(pid, timeout):
                 return None
             _dcv.wait(rem)
         return _decisions.pop(pid)
+
+
+# --- buddy answers the live terminal picker by injecting keystrokes ----------
+_active_q = [None]   # {"id", "labels", "target"} while an AskUserQuestion is open
+
+
+def _inject_keys(target, idx, n):
+    """Drive Claude Code's AskUserQuestion picker to option `idx` (0-based): home
+    the cursor to the top, step down `idx`, confirm. Routed to THIS terminal via
+    tmux or kitty remote control (whichever the hook captured)."""
+    target = target or {}
+    pane = target.get("tmux_pane")
+    listen = target.get("kitty_listen")
+    win = target.get("kitty_window")
+    up = max(n, idx) + 3
+    try:
+        if pane:
+            seq = ["Up"] * up + ["Down"] * idx + ["Enter"]
+            subprocess.run(["tmux", "send-keys", "-t", pane, *seq],
+                           timeout=4, check=False)
+            print(f"[buddy] injected via tmux pane={pane} idx={idx}")
+        elif listen:
+            keys = ["up"] * up + ["down"] * idx + ["enter"]
+            cmd = ["kitty", "@", "--to", listen, "send-key"]
+            if win:
+                cmd += ["--match", f"id:{win}"]
+            subprocess.run(cmd + keys, timeout=4, check=False)
+            print(f"[buddy] injected via kitty win={win} idx={idx}")
+        else:
+            print("[buddy] buddy tap ignored: no tmux/kitty target "
+                  "(enable kitty remote control or run claude in tmux)")
+    except Exception as exc:
+        print(f"[buddy] inject err: {exc}")
+
+
+def handle_qchoice(qid, idx):
+    with _slock:
+        aq = _active_q[0]
+        if not aq or aq.get("id") != qid:
+            return
+        _active_q[0] = None
+    labels = aq.get("labels") or []
+    if isinstance(idx, int) and 0 <= idx < len(labels):
+        _inject_keys(aq.get("target"), idx, len(labels))
+    send({"qclear": True})
 
 
 # --- activity tracking ------------------------------------------------------
@@ -350,17 +400,22 @@ class H(BaseHTTPRequestHandler):
                     # -1 (tapped "keyboard") or None (timeout) -> defer to the terminal
                     self._send({"label": None, "defer": True})
         elif path == "/show_question":
-            # Observation-only: display the question on the buddy and return at
-            # once. We never block — the terminal owns the actual answer.
+            # Mirror the question to the buddy with a unique id. The terminal picker
+            # stays live; a buddy tap gets injected into it (see handle_qchoice).
             qtext, labels = _question_of(ev.get("tool_input", {}))
             note_activity(sid, "asking...")
-            send({"question": {"id": "info", "q": qtext[:150], "opts": labels, "info": 1}})
+            qid = uuid.uuid4().hex[:8]
+            with _slock:
+                _active_q[0] = {"id": qid, "labels": labels, "target": ev.get("_target", {})}
+            send({"question": {"id": qid, "q": qtext[:150], "opts": labels, "kbd": 1}})
             self._send({"ok": True})
         elif path == "/activity":
             if ev.get("transcript_path"):
                 _transcript[0] = ev["transcript_path"]
-            # AskUserQuestion finished (answered in the terminal) -> clear the card
+            # AskUserQuestion finished (answered anywhere) -> clear the card + state
             if ev.get("event") == "PostToolUse" and ev.get("tool") == "AskUserQuestion":
+                with _slock:
+                    _active_q[0] = None
                 send({"qclear": True})
             note_activity(sid, ev.get("msg", ""), completed=bool(ev.get("completed")))
             self._send({"ok": True})
