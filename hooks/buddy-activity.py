@@ -35,6 +35,8 @@ payload = {
     "msg": msg,
     "completed": completed,
     "transcript_path": ev.get("transcript_path", ""),
+    "event": en,
+    "tool": tool,
 }
 try:
     req = urllib.request.Request(

@@ -353,6 +353,9 @@ class H(BaseHTTPRequestHandler):
         elif path == "/activity":
             if ev.get("transcript_path"):
                 _transcript[0] = ev["transcript_path"]
+            # AskUserQuestion finished (answered in the terminal) -> clear the card
+            if ev.get("event") == "PostToolUse" and ev.get("tool") == "AskUserQuestion":
+                send({"qclear": True})
             note_activity(sid, ev.get("msg", ""), completed=bool(ev.get("completed")))
             self._send({"ok": True})
         elif path == "/test":
