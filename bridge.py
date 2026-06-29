@@ -16,6 +16,7 @@ lines are prefixed with \\x02BUDDY so they can be picked out of boot/log noise.
 """
 import json
 import os
+import socket
 import sys
 import time
 import threading
@@ -111,9 +112,11 @@ def reader():
                 d = json.loads(ln[i + len(PROMPT_PREFIX):].decode("utf-8", "replace"))
             except Exception:
                 continue
-            if "id" in d and ("decision" in d or "qchoice" in d):
+            if "id" in d and "qchoice" in d:
+                handle_qchoice(d["id"], d["qchoice"])   # buddy answered a question
+            elif "id" in d and "decision" in d:
                 with _dcv:
-                    _decisions[d["id"]] = d.get("decision", d.get("qchoice"))
+                    _decisions[d["id"]] = d["decision"]
                     _dcv.notify_all()
 
 
@@ -128,8 +131,44 @@ def wait_decision(pid, timeout):
         return _decisions.pop(pid)
 
 
-# Flux Island model: the buddy DISPLAYS the question for awareness; you answer in
-# the terminal (native, no "Error:"); the card clears on PostToolUse(AskUserQuestion).
+# --- buddy answers the live terminal picker by injecting keystrokes -----------
+# bufo-claude runs claude in a pty and listens on a unix socket; we type the
+# chosen option into that pty. Native answer, no tmux, no "Error:".
+_active_q = [None]   # {"id", "labels", "target"} while an AskUserQuestion is open
+
+# Keystroke recipe for the AskUserQuestion picker (tunable at test time): home the
+# cursor to the top, step down to the option, confirm.
+_K_UP, _K_DOWN, _K_ENTER = b"\x1b[A", b"\x1b[B", b"\r"
+
+
+def _inject_keys(target, idx, n):
+    sock_path = (target or {}).get("pty_sock")
+    if not sock_path:
+        print("[buddy] buddy tap ignored: session not under bufo-claude "
+              "(run claude via the bufo-claude launcher to enable tap-to-answer)")
+        return
+    seq = _K_UP * (max(n, idx) + 3) + _K_DOWN * idx + _K_ENTER
+    try:
+        c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        c.settimeout(2)
+        c.connect(sock_path)
+        c.sendall(seq)
+        c.close()
+        print(f"[buddy] injected option {idx} into pty {sock_path}")
+    except Exception as exc:
+        print(f"[buddy] inject err: {exc}")
+
+
+def handle_qchoice(qid, idx):
+    with _slock:
+        aq = _active_q[0]
+        if not aq or aq.get("id") != qid:
+            return
+        _active_q[0] = None
+    labels = aq.get("labels") or []
+    if isinstance(idx, int) and 0 <= idx < len(labels):
+        _inject_keys(aq.get("target"), idx, len(labels))
+    send({"qclear": True})
 
 
 # --- activity tracking ------------------------------------------------------
@@ -354,17 +393,22 @@ class H(BaseHTTPRequestHandler):
                     # -1 (tapped "keyboard") or None (timeout) -> defer to the terminal
                     self._send({"label": None, "defer": True})
         elif path == "/show_question":
-            # Observation-only (Flux model): display the question read-only. You
-            # answer in the terminal; the card clears on PostToolUse(AskUserQuestion).
+            # Mirror the question to the buddy (tappable). The terminal picker stays
+            # live; a buddy tap is typed into the pty (see handle_qchoice).
             qtext, labels = _question_of(ev.get("tool_input", {}))
             note_activity(sid, "asking...")
-            send({"question": {"id": "info", "q": qtext[:150], "opts": labels, "info": 1}})
+            qid = uuid.uuid4().hex[:8]
+            with _slock:
+                _active_q[0] = {"id": qid, "labels": labels, "target": ev.get("_target", {})}
+            send({"question": {"id": qid, "q": qtext[:150], "opts": labels, "kbd": 1}})
             self._send({"ok": True})
         elif path == "/activity":
             if ev.get("transcript_path"):
                 _transcript[0] = ev["transcript_path"]
-            # Clear the question card the moment AskUserQuestion finishes (answered).
+            # Answered in the terminal -> clear the card + active question state.
             if ev.get("event") == "PostToolUse" and ev.get("tool") == "AskUserQuestion":
+                with _slock:
+                    _active_q[0] = None
                 send({"qclear": True})
             note_activity(sid, ev.get("msg", ""), completed=bool(ev.get("completed")))
             self._send({"ok": True})
