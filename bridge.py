@@ -258,31 +258,32 @@ def _opt_labels(opts):
 def _question_of(ti):
     """Return (question_text, [labels]) from an AskUserQuestion tool_input,
     handling both the `questions:[{question,options:[{label}]}]` shape and a
-    flat `{question, options}` shape."""
+    flat `{question, options}` shape. Sanitized to ASCII (the buddy font)."""
     ti = ti or {}
     qs = ti.get("questions")
     if isinstance(qs, list) and qs:
         q0 = qs[0] or {}
-        return str(q0.get("question", "?")), _opt_labels(q0.get("options", []))
-    return str(ti.get("question", "?")), _opt_labels(ti.get("options", []))
+        q, opts = str(q0.get("question", "?")), _opt_labels(q0.get("options", []))
+    else:
+        q, opts = str(ti.get("question", "?")), _opt_labels(ti.get("options", []))
+    return _ascii(q), [_ascii(o) for o in opts]
 
 
 def _hint_for(tool, ti):
     ti = ti or {}
     if tool == "Bash":
-        return str(ti.get("command", ""))[:180]
-    if tool in ("Edit", "Write", "Read", "NotebookEdit"):
-        return str(ti.get("file_path", ""))[:180]
-    if tool == "WebFetch":
-        return str(ti.get("url", ""))[:180]
-    if tool == "AskUserQuestion":
+        h = str(ti.get("command", ""))
+    elif tool in ("Edit", "Write", "Read", "NotebookEdit"):
+        h = str(ti.get("file_path", ""))
+    elif tool == "WebFetch":
+        h = str(ti.get("url", ""))
+    elif tool == "AskUserQuestion":
         opts = ti.get("options", []) or []
         labels = [o.get("label", str(o)) if isinstance(o, dict) else str(o) for o in opts]
-        return (str(ti.get("question", "")) + "  |  " + " / ".join(labels))[:180]
-    for v in ti.values():
-        if isinstance(v, str) and v:
-            return v[:180]
-    return tool
+        h = str(ti.get("question", "")) + "  |  " + " / ".join(labels)
+    else:
+        h = next((v for v in ti.values() if isinstance(v, str) and v), tool)
+    return _ascii(h)[:180]   # buddy font is ASCII-only
 
 
 # --- HTTP endpoint for the hooks -------------------------------------------
